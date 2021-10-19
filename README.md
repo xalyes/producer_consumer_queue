@@ -1,5 +1,7 @@
 # Producer-Consumer queue
 
+Dependencies for test app: Boost  
+
 Build and run tests:  
 $ mkdir build  
 $ cd build  
