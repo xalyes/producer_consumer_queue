@@ -63,7 +63,7 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
     std::vector<std::pair<uint8_t, uint64_t>> actualQueue;
     actualQueue.reserve(count);
 
-    std::atomic_uint32_t counter = 1;
+    std::atomic_uint32_t counter = 0;
 
     PCQueue<uint8_t, uint64_t> q;
 
@@ -77,7 +77,7 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
     {
         q.Subscribe(key, &c);
 
-        while (counter != count)
+        while (counter < count)
             q.Enqueue(key, counter++);
     };
 
@@ -97,7 +97,7 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
 
     q.StopProcessing(true);
 
-    BOOST_TEST((count - 1) == actualQueue.size());
+    BOOST_TEST(counter == actualQueue.size());
 }
 
 //-------------------------------------------------------------------------------
@@ -122,7 +122,7 @@ BOOST_AUTO_TEST_CASE(PerformanceTest)
         {
             q.Subscribe(key, &c);
 
-            while (counter != count)
+            while (counter < count)
                 q.Enqueue(key, "msg" + std::to_string(counter++));
         };
 
@@ -147,6 +147,8 @@ BOOST_AUTO_TEST_CASE(PerformanceTest)
             auto end = std::chrono::steady_clock::now();
             std::cout << "Time elapsed with " << std::to_string(threadsCount) << " threads: " << std::chrono::duration_cast<std::chrono::seconds>(end - begin).count() << "[s]" << std::endl;
         }
+
+        BOOST_TEST(counter == actualQueue.size());
     };
 
     perfTest(1);
