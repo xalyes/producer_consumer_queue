@@ -29,10 +29,11 @@ public:
 
     void Subscribe(Key queueId, IConsumer<Key, Value>* consumer);
     void Unsubscribe(Key queueId);
+
     void Enqueue(Key queueId, Value value);
     std::optional<Value> Dequeue(Key queueId);
-    void StopProcessing(bool waitConsume = true);
 
+    void StopProcessing(bool waitConsume = true);
     ~PCQueue();
 
 private:

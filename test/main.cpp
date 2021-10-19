@@ -7,6 +7,7 @@
 #include <vector>
 #include <functional>
 
+//-------------------------------------------------------------------------------
 template<class Key, class Value>
 class Consumer : public IConsumer<Key, Value>
 {
@@ -24,6 +25,7 @@ private:
     const std::function<void(Key, Value)> m_f;
 };
 
+//-------------------------------------------------------------------------------
 BOOST_AUTO_TEST_CASE(BasicTest)
 {
     std::vector<std::pair<int, std::string>> expectedQueue { {123, "1"}, {123, "2"}, {123, "3"}, {123, "4"}, {123, "5"}, {123, "6"} };
@@ -54,6 +56,7 @@ BOOST_AUTO_TEST_CASE(BasicTest)
     }
 }
 
+//-------------------------------------------------------------------------------
 BOOST_AUTO_TEST_CASE(MultithreadingTest)
 {
     size_t count = 10000000;
@@ -97,6 +100,7 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
     BOOST_TEST((count - 1) == actualQueue.size());
 }
 
+//-------------------------------------------------------------------------------
 BOOST_AUTO_TEST_CASE(PerformanceTest)
 {
     size_t count = 25000000;
