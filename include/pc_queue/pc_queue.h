@@ -25,7 +25,7 @@ public:
     SingleQueue(const SingleQueue& other) = delete;
     SingleQueue& operator= (const SingleQueue& other) = delete;
 
-    SingleQueue(SingleQueue&& other)
+    SingleQueue(SingleQueue&& other) noexcept
         : m_id(other.m_id)
     {
         m_consumer = other.m_consumer;
