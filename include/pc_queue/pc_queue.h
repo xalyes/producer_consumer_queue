@@ -93,12 +93,15 @@ void PCQueue<Key, Value>::Process()
 template<typename Key, typename Value>
 void PCQueue<Key, Value>::Subscribe(Key queueId, IConsumer<Key, Value>* consumer)
 {
-    std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
-    auto it = m_queues.find(queueId);
-    if (it == m_queues.end())
-        m_queues.emplace(queueId, SingleQueue<Key, Value>(queueId, consumer));
-    else
-        throw std::invalid_argument("Queue with that id already exists");
+    {
+        std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
+        auto it = m_queues.find(queueId);
+        if (it == m_queues.end())
+            m_queues.emplace(queueId, SingleQueue<Key, Value>(queueId, consumer));
+        else
+            it->second.Subscribe(consumer);
+    }
+    m_cv.notify_one();
 }
 
 //-------------------------------------------------------------------------------
@@ -108,7 +111,10 @@ void PCQueue<Key, Value>::Unsubscribe(Key queueId)
     std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
     auto it = m_queues.find(queueId);
     if (it != m_queues.end())
-        m_queues.erase(it);
+    {
+        SingleQueue<Key, Value>& queue = it->second;
+        queue.Unsubscribe();
+    }
 }
 
 //-------------------------------------------------------------------------------
@@ -124,7 +130,14 @@ void PCQueue<Key, Value>::Enqueue(Key queueId, Value value)
     }
     else
     {
-        throw std::invalid_argument("Queue with that id doesn't exists");
+        lock.unlock();
+        std::unique_lock<std::shared_mutex> uniqueLock(m_queuesMutex);
+        auto secondIt = m_queues.find(queueId);
+        if (secondIt == m_queues.end())
+            secondIt = m_queues.emplace(queueId, SingleQueue<Key, Value>(queueId, nullptr)).first;
+
+        SingleQueue<Key, Value>& queue = secondIt->second;
+        queue.Push(value);
     }
     m_cv.notify_one();
 }
@@ -141,10 +154,7 @@ std::optional<Value> PCQueue<Key, Value>::Dequeue(Key queueId)
 
         return queue.Pop();
     }
-    else
-    {
-        throw std::invalid_argument("Queue with that id doesn't exists");
-    }
+    return std::nullopt;
 }
 
 //-------------------------------------------------------------------------------

@@ -26,6 +26,9 @@ public:
     std::optional<Value> Pop();
     void Push(const Value& v);
 
+    void Subscribe(IConsumer<Key, Value>* consumer);
+    void Unsubscribe();
+
 private:
     const Key m_id;
     IConsumer<Key, Value>* m_consumer;
@@ -73,6 +76,9 @@ void SingleQueue<Key, Value>::ConsumeAll()
 {
     std::unique_lock<std::mutex> lock(m_mutex);
 
+    if (!m_consumer)
+        return;
+
     while (!m_queue.empty())
     {
         m_consumer->Consume(m_id, m_queue.front());
@@ -100,3 +106,20 @@ void SingleQueue<Key, Value>::Push(const Value& v)
     std::unique_lock<std::mutex> lock(m_mutex);
     m_queue.push(v);
 }
+
+//-------------------------------------------------------------------------------
+template<typename Key, typename Value>
+void SingleQueue<Key, Value>::Subscribe(IConsumer<Key, Value>* consumer)
+{
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_consumer = consumer;
+}
+
+//-------------------------------------------------------------------------------
+template<typename Key, typename Value>
+void SingleQueue<Key, Value>::Unsubscribe()
+{
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_consumer = nullptr;
+}
+
