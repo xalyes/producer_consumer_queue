@@ -7,68 +7,20 @@
 #include <stdexcept>
 #include <condition_variable>
 
+#include "detail/single_queue.h"
+
+//-------------------------------------------------------------------------------
+//                             IConsumer
+//-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 struct IConsumer
 {
     virtual void Consume(Key id, const Value& value) = 0;
 };
 
-template<typename Key, typename Value>
-class SingleQueue
-{
-public:
-    SingleQueue(Key id, IConsumer<Key, Value>* consumer)
-        : m_id(id)
-        , m_consumer(consumer)
-    {}
-
-    SingleQueue(const SingleQueue& other) = delete;
-    SingleQueue& operator= (const SingleQueue& other) = delete;
-
-    SingleQueue(SingleQueue&& other) noexcept
-        : m_id(other.m_id)
-    {
-        m_consumer = other.m_consumer;
-        m_queue = std::move(other.m_queue);
-    }
-
-    SingleQueue& operator= (SingleQueue&& other)
-    {
-        m_id = other.m_id;
-        m_consumer = other.m_consumer;
-        m_queue = std::move(other.m_queue);
-    }
-
-    bool Empty() const
-    {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        return m_queue.empty();
-    }
-
-    void ConsumeAll()
-    {
-        std::unique_lock<std::mutex> lock(m_mutex);
-
-        while (!m_queue.empty())
-        {
-            m_consumer->Consume(m_id, m_queue.front());
-            m_queue.pop();
-        }
-    }
-
-    void Push(const Value& v)
-    {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_queue.push(v);
-    }
-
-private:
-    const Key m_id;
-    IConsumer<Key, Value>* m_consumer;
-    mutable std::mutex m_mutex;
-    std::queue<Value> m_queue;
-};
-
+//-------------------------------------------------------------------------------
+//                             PCQueue
+//-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 class PCQueue
 {
@@ -78,31 +30,10 @@ public:
     void Subscribe(Key queueId, IConsumer<Key, Value>* consumer);
     void Unsubscribe(Key queueId);
     void Enqueue(Key queueId, Value value);
+    std::optional<Value> Dequeue(Key queueId);
+    void StopProcessing(bool waitConsume = true);
 
-    void StopProcessing(bool waitConsume = true)
-    {
-        m_running = false;
-        m_cv.notify_one();
-        m_worker.join();
-
-        if (waitConsume)
-        {
-            std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
-            for (auto& queue : m_queues)
-            {
-                queue.second.ConsumeAll();
-            }
-        }
-    }
-
-    ~PCQueue()
-    {
-        try
-        {
-            StopProcessing(false);
-        }
-        catch (...) {}
-    }
+    ~PCQueue();
 
 private:
     void Process();
@@ -116,12 +47,14 @@ private:
     std::thread m_worker;
 };
 
+//-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 PCQueue<Key, Value>::PCQueue()
     : m_running(true)
     , m_worker([&]() { Process(); })
 {}
 
+//-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 void PCQueue<Key, Value>::Process()
 {
@@ -140,7 +73,7 @@ void PCQueue<Key, Value>::Process()
         if (queuesEmpty())
         {
             m_cv.wait(lock, [&] {
-                return !m_running || !queuesEmpty();
+                    return !m_running || !queuesEmpty();
                 }
             );
         }
@@ -155,6 +88,7 @@ void PCQueue<Key, Value>::Process()
     }
 }
 
+//-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 void PCQueue<Key, Value>::Subscribe(Key queueId, IConsumer<Key, Value>* consumer)
 {
@@ -166,6 +100,7 @@ void PCQueue<Key, Value>::Subscribe(Key queueId, IConsumer<Key, Value>* consumer
         throw std::invalid_argument("Queue with that id already exists");
 }
 
+//-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 void PCQueue<Key, Value>::Unsubscribe(Key queueId)
 {
@@ -175,6 +110,7 @@ void PCQueue<Key, Value>::Unsubscribe(Key queueId)
         m_queues.erase(it);
 }
 
+//-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 void PCQueue<Key, Value>::Enqueue(Key queueId, Value value)
 {
@@ -190,4 +126,51 @@ void PCQueue<Key, Value>::Enqueue(Key queueId, Value value)
         throw std::invalid_argument("Queue with that id doesn't exists");
     }
     m_cv.notify_one();
+}
+
+//-------------------------------------------------------------------------------
+template<typename Key, typename Value>
+std::optional<Value> PCQueue<Key, Value>::Dequeue(Key queueId)
+{
+    std::shared_lock<std::shared_mutex> lock(m_queuesMutex);
+    auto it = m_queues.find(queueId);
+    if (it != m_queues.end())
+    {
+        SingleQueue<Key, Value>& queue = it->second;
+
+        return queue.Pop();
+    }
+    else
+    {
+        throw std::invalid_argument("Queue with that id doesn't exists");
+    }
+}
+
+//-------------------------------------------------------------------------------
+template<typename Key, typename Value>
+void PCQueue<Key, Value>::StopProcessing(bool waitConsume /* = true */)
+{
+    m_running = false;
+    m_cv.notify_one();
+    m_worker.join();
+
+    if (waitConsume)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
+        for (auto& queue : m_queues)
+        {
+            queue.second.ConsumeAll();
+        }
+    }
+}
+
+//-------------------------------------------------------------------------------
+template<typename Key, typename Value>
+PCQueue<Key, Value>::~PCQueue()
+{
+    try
+    {
+        StopProcessing(false);
+    }
+    catch (...) {}
 }
