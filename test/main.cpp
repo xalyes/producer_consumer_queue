@@ -56,7 +56,7 @@ BOOST_AUTO_TEST_CASE(BasicTest)
 
 BOOST_AUTO_TEST_CASE(MultithreadingTest)
 {
-    size_t count = 100000000;
+    size_t count = 10000000;
     std::vector<std::pair<uint8_t, uint64_t>> actualQueue;
     actualQueue.reserve(count);
 
@@ -95,4 +95,58 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
     q.StopProcessing(true);
 
     BOOST_TEST((count - 1) == actualQueue.size());
+}
+
+BOOST_AUTO_TEST_CASE(PerformanceTest)
+{
+    size_t count = 25000000;
+
+    auto perfTest = [&](int threadsCount)
+    {
+        std::vector<std::pair<int, std::string>> actualQueue;
+        actualQueue.reserve(count);
+
+        std::atomic_uint32_t counter = 0;
+
+        Consumer<int, std::string> c([&](int id, const std::string& value)
+            {
+                actualQueue.emplace_back(id, value);
+            }
+        );
+
+        auto worker = [&](PCQueue<int, std::string>& q, int key)
+        {
+            q.Subscribe(key, &c);
+
+            while (counter != count)
+                q.Enqueue(key, "msg" + std::to_string(counter++));
+        };
+
+        {
+            PCQueue<int, std::string> q;
+            auto begin = std::chrono::steady_clock::now();
+
+            std::vector<std::thread> threads;
+
+            for (int i = 0; i < threadsCount; i++)
+            {
+                threads.emplace_back([&q, &worker, i]() { worker(q, i); });
+            }
+
+            for (auto& t : threads)
+            {
+                t.join();
+            }
+
+            q.StopProcessing(true);
+
+            auto end = std::chrono::steady_clock::now();
+            std::cout << "Time elapsed with " << std::to_string(threadsCount) << " threads: " << std::chrono::duration_cast<std::chrono::seconds>(end - begin).count() << "[s]" << std::endl;
+        }
+    };
+
+    perfTest(1);
+    perfTest(2);
+    perfTest(4);
+    perfTest(8);
 }
