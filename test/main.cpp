@@ -103,7 +103,7 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
 //-------------------------------------------------------------------------------
 BOOST_AUTO_TEST_CASE(PerformanceTest)
 {
-    size_t count = 25000000;
+    size_t count = 20000000;
 
     auto perfTest = [&](int threadsCount)
     {
