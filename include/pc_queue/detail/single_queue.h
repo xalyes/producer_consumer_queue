@@ -29,11 +29,21 @@ public:
     void Subscribe(IConsumer<Key, Value>* consumer);
     void Unsubscribe();
 
+    void StopProcessing(bool waitConsume = true);
+    ~SingleQueue();
+
+private:
+    void Process();
+
 private:
     const Key m_id;
     IConsumer<Key, Value>* m_consumer;
     mutable std::mutex m_mutex;
     std::queue<Value> m_queue;
+
+    std::condition_variable m_cv;
+    bool m_running;
+    std::thread m_worker;
 };
 
 //-------------------------------------------------------------------------------
@@ -41,7 +51,49 @@ template<typename Key, typename Value>
 SingleQueue<Key, Value>::SingleQueue(Key id, IConsumer<Key, Value>* consumer)
     : m_id(id)
     , m_consumer(consumer)
+    , m_running(true)
+    , m_worker([&]() { Process(); })
 {}
+
+//-------------------------------------------------------------------------------
+template<typename Key, typename Value>
+void SingleQueue<Key, Value>::Process()
+{
+    auto condition = [&]()
+    {
+        return !m_running || (!m_queue.empty() && m_consumer);
+    };
+
+    while (true)
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (!condition())
+        {
+            m_cv.wait(lock, [&]() {
+                    return condition();
+                }
+            );
+        }
+
+        if (!m_running)
+            return;
+
+        while (!m_queue.empty())
+        {
+            try
+            {
+                m_consumer->Consume(m_id, std::move(m_queue.front()));
+            }
+            catch (...)
+            {
+                // Drop
+            }
+
+            m_queue.pop();
+        }
+    }
+}
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
@@ -55,16 +107,7 @@ bool SingleQueue<Key, Value>::Empty() const
 template<typename Key, typename Value>
 void SingleQueue<Key, Value>::ConsumeAll()
 {
-    std::unique_lock<std::mutex> lock(m_mutex);
-
-    if (!m_consumer)
-        return;
-
-    while (!m_queue.empty())
-    {
-        m_consumer->Consume(m_id, m_queue.front());
-        m_queue.pop();
-    }
+    m_cv.notify_one();
 }
 
 //-------------------------------------------------------------------------------
@@ -104,3 +147,49 @@ void SingleQueue<Key, Value>::Unsubscribe()
     m_consumer = nullptr;
 }
 
+//-------------------------------------------------------------------------------
+template<typename Key, typename Value>
+void SingleQueue<Key, Value>::StopProcessing(bool waitConsume /* = true */)
+{
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_running = false;
+    }
+
+    m_cv.notify_one();
+    if (m_worker.joinable())
+        m_worker.join();
+
+    if (!waitConsume)
+        return;
+
+    std::unique_lock<std::mutex> lock(m_mutex);
+
+    if (!m_consumer)
+        return;
+
+    while (!m_queue.empty())
+    {
+        try
+        {
+            m_consumer->Consume(m_id, std::move(m_queue.front()));
+        }
+        catch (...)
+        {
+            // Drop
+        }
+
+        m_queue.pop();
+    }
+}
+
+//-------------------------------------------------------------------------------
+template<typename Key, typename Value>
+SingleQueue<Key, Value>::~SingleQueue()
+{
+    try
+    {
+        StopProcessing(false);
+    }
+    catch (...) {}
+}
