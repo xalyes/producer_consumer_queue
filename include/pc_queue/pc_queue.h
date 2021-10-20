@@ -27,6 +27,12 @@ class PCQueue
 public:
     PCQueue();
 
+    PCQueue(const PCQueue& other) = delete;
+    PCQueue& operator= (const PCQueue& other) = delete;
+
+    PCQueue(PCQueue&& other) = delete;
+    PCQueue& operator= (PCQueue&& other) = delete;
+
     void Subscribe(Key queueId, IConsumer<Key, Value>* consumer);
     void Unsubscribe(Key queueId);
 
@@ -97,9 +103,17 @@ void PCQueue<Key, Value>::Subscribe(Key queueId, IConsumer<Key, Value>* consumer
         std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
         auto it = m_queues.find(queueId);
         if (it == m_queues.end())
-            m_queues.emplace(queueId, SingleQueue<Key, Value>(queueId, consumer));
+        {
+            m_queues.emplace(
+                std::piecewise_construct,
+                std::forward_as_tuple(queueId),
+                std::forward_as_tuple(queueId, consumer)
+            );
+        }
         else
+        {
             it->second.Subscribe(consumer);
+        }
     }
     m_cv.notify_one();
 }
@@ -134,7 +148,13 @@ void PCQueue<Key, Value>::Enqueue(Key queueId, Value value)
         std::unique_lock<std::shared_mutex> uniqueLock(m_queuesMutex);
         auto secondIt = m_queues.find(queueId);
         if (secondIt == m_queues.end())
-            secondIt = m_queues.emplace(queueId, SingleQueue<Key, Value>(queueId, nullptr)).first;
+        {
+            secondIt = m_queues.emplace(
+                std::piecewise_construct,
+                std::forward_as_tuple(queueId),
+                std::forward_as_tuple(queueId, nullptr)
+            ).first;
+        }
 
         SingleQueue<Key, Value>& queue = secondIt->second;
         queue.Push(value);

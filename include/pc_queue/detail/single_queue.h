@@ -18,8 +18,8 @@ public:
     SingleQueue(const SingleQueue& other) = delete;
     SingleQueue& operator= (const SingleQueue& other) = delete;
 
-    SingleQueue(SingleQueue&& other) noexcept;
-    SingleQueue& operator= (SingleQueue&& other);
+    SingleQueue(SingleQueue&& other) = delete;
+    SingleQueue& operator= (SingleQueue&& other) = delete;
 
     bool Empty() const;
     void ConsumeAll();
@@ -42,27 +42,6 @@ SingleQueue<Key, Value>::SingleQueue(Key id, IConsumer<Key, Value>* consumer)
     : m_id(id)
     , m_consumer(consumer)
 {}
-
-//-------------------------------------------------------------------------------
-template<typename Key, typename Value>
-SingleQueue<Key, Value>::SingleQueue(SingleQueue&& other) noexcept
-    : m_id(other.m_id)
-{
-    m_consumer = other.m_consumer;
-    other.m_consumer = nullptr;
-    m_queue = std::move(other.m_queue);
-}
-
-//-------------------------------------------------------------------------------
-template<typename Key, typename Value>
-SingleQueue<Key, Value>& SingleQueue<Key, Value>::operator= (SingleQueue<Key, Value>&& other)
-{
-    m_id = other.m_id;
-    m_consumer = other.m_consumer;
-    other.m_consumer = nullptr;
-    m_queue = std::move(other.m_queue);
-    return *this;
-}
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
