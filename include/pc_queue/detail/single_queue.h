@@ -3,6 +3,9 @@
 #include <mutex>
 #include <optional>
 
+#include "output_queue.h"
+
+//-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 struct IConsumer;
 
@@ -34,6 +37,7 @@ private:
     IConsumer<Key, Value>* m_consumer;
     mutable std::mutex m_mutex;
     std::queue<Value> m_queue;
+    OutputQueue<Key, Value> m_outputQueue;
 };
 
 //-------------------------------------------------------------------------------
@@ -41,6 +45,7 @@ template<typename Key, typename Value>
 SingleQueue<Key, Value>::SingleQueue(Key id, IConsumer<Key, Value>* consumer)
     : m_id(id)
     , m_consumer(consumer)
+    , m_outputQueue(id, 2)
 {}
 
 //-------------------------------------------------------------------------------
