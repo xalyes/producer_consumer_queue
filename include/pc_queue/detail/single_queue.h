@@ -13,7 +13,7 @@ template<typename Key, typename Value>
 class SingleQueue
 {
 public:
-    SingleQueue(Key id, IConsumer<Key, Value>* consumer);
+    SingleQueue(Key id, IConsumer<Key, Value>* consumer, size_t maxCapacity);
 
     SingleQueue(const SingleQueue& other) = delete;
     SingleQueue& operator= (const SingleQueue& other) = delete;
@@ -24,7 +24,7 @@ public:
     bool Empty() const;
     void ConsumeAll();
     std::optional<Value> Pop();
-    void Push(const Value& v);
+    bool Push(Value&& v);
 
     void Subscribe(IConsumer<Key, Value>* consumer);
     void Unsubscribe();
@@ -37,6 +37,7 @@ private:
 
 private:
     const Key m_id;
+    const size_t m_maxCapacity;
     IConsumer<Key, Value>* m_consumer;
     mutable std::mutex m_mutex;
     std::queue<Value> m_queue;
@@ -48,8 +49,9 @@ private:
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
-SingleQueue<Key, Value>::SingleQueue(Key id, IConsumer<Key, Value>* consumer)
+SingleQueue<Key, Value>::SingleQueue(Key id, IConsumer<Key, Value>* consumer, size_t maxCapacity)
     : m_id(id)
+    , m_maxCapacity(maxCapacity)
     , m_consumer(consumer)
     , m_running(true)
     , m_worker([&]() { Process(); })
@@ -125,10 +127,14 @@ std::optional<Value> SingleQueue<Key, Value>::Pop()
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
-void SingleQueue<Key, Value>::Push(const Value& v)
+bool SingleQueue<Key, Value>::Push(Value&& v)
 {
     std::unique_lock<std::mutex> lock(m_mutex);
-    m_queue.push(v);
+    if (m_queue.size() == m_maxCapacity)
+        return false;
+
+    m_queue.push(std::move(v));
+    return true;
 }
 
 //-------------------------------------------------------------------------------

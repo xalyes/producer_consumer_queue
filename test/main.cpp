@@ -31,7 +31,7 @@ BOOST_AUTO_TEST_CASE(BasicTest)
     std::vector<std::pair<int, std::string>> expectedQueue { {123, "1"}, {123, "2"}, {123, "3"}, {123, "4"}, {123, "5"}, {123, "6"} };
     std::vector<std::pair<int, std::string>> actualQueue;
 
-    PCQueue<int, std::string> q;
+    PCQueue<int, std::string> q(7);
     
     Consumer<int, std::string> c([&](int id, const std::string& value)
         {
@@ -60,16 +60,14 @@ BOOST_AUTO_TEST_CASE(BasicTest)
 BOOST_AUTO_TEST_CASE(MultithreadingTest)
 {
     size_t count = 10000000;
-    std::vector<std::pair<uint8_t, uint64_t>> actualQueue;
-    actualQueue.reserve(count);
+    std::atomic_uint32_t receivedItems = 0;
+    std::atomic_uint32_t sentItems = 0;
 
-    std::atomic_uint32_t counter = 0;
-
-    PCQueue<uint8_t, uint64_t> q;
+    PCQueue<uint8_t, uint64_t> q(count);
 
     Consumer<uint8_t, uint64_t> c([&](uint8_t id, const uint64_t& value)
         {
-            actualQueue.emplace_back(id, value);
+            receivedItems.fetch_add(1, std::memory_order::memory_order_relaxed);
         }
     );
 
@@ -77,8 +75,8 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
     {
         q.Subscribe(key, &c);
 
-        while (counter < count)
-            q.Enqueue(key, counter++);
+        while (sentItems < count)
+            q.Enqueue(key, sentItems.fetch_add(1, std::memory_order::memory_order_relaxed));
     };
 
     std::thread t1{ [&]() { worker(1); } };
@@ -97,7 +95,7 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
 
     q.StopProcessing(true);
 
-    BOOST_TEST(counter == actualQueue.size());
+    BOOST_TEST(sentItems == receivedItems);
 }
 
 //-------------------------------------------------------------------------------
@@ -107,14 +105,12 @@ BOOST_AUTO_TEST_CASE(PerformanceTest)
 
     auto perfTest = [&](int threadsCount)
     {
-        std::vector<std::pair<int, std::string>> actualQueue;
-        actualQueue.reserve(count);
-
-        std::atomic_uint32_t counter = 0;
+        std::atomic_uint32_t receivedItems = 0;
+        std::atomic_uint32_t sentItems = 0;
 
         Consumer<int, std::string> c([&](int id, const std::string& value)
             {
-                actualQueue.emplace_back(id, value);
+                receivedItems.fetch_add(1, std::memory_order::memory_order_relaxed);
             }
         );
 
@@ -122,12 +118,12 @@ BOOST_AUTO_TEST_CASE(PerformanceTest)
         {
             q.Subscribe(key, &c);
 
-            while (counter < count)
-                q.Enqueue(key, "msg" + std::to_string(counter++));
+            while (sentItems < count)
+                q.Enqueue(key, "msg" + std::to_string(sentItems.fetch_add(1, std::memory_order::memory_order_relaxed)));
         };
 
         {
-            PCQueue<int, std::string> q;
+            PCQueue<int, std::string> q(count);
             auto begin = std::chrono::steady_clock::now();
 
             std::vector<std::thread> threads;
@@ -148,7 +144,7 @@ BOOST_AUTO_TEST_CASE(PerformanceTest)
             std::cout << "Time elapsed with " << std::to_string(threadsCount) << " threads: " << std::chrono::duration_cast<std::chrono::seconds>(end - begin).count() << "[s]" << std::endl;
         }
 
-        BOOST_TEST(counter == actualQueue.size());
+        BOOST_TEST(sentItems == receivedItems);
     };
 
     perfTest(1);

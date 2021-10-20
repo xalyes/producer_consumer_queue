@@ -25,7 +25,7 @@ template<typename Key, typename Value>
 class PCQueue
 {
 public:
-    PCQueue();
+    PCQueue(size_t maxCapacity);
 
     PCQueue(const PCQueue& other) = delete;
     PCQueue& operator= (const PCQueue& other) = delete;
@@ -33,11 +33,11 @@ public:
     PCQueue(PCQueue&& other) = delete;
     PCQueue& operator= (PCQueue&& other) = delete;
 
-    void Subscribe(Key queueId, IConsumer<Key, Value>* consumer);
-    void Unsubscribe(Key queueId);
+    void Subscribe(const Key& queueId, IConsumer<Key, Value>* consumer);
+    void Unsubscribe(const Key& queueId);
 
-    void Enqueue(Key queueId, Value value);
-    std::optional<Value> Dequeue(Key queueId);
+    bool Enqueue(const Key& queueId, Value value);
+    std::optional<Value> Dequeue(const Key& queueId);
 
     void StopProcessing(bool waitConsume = true);
     ~PCQueue();
@@ -46,6 +46,7 @@ private:
     void Process();
 
 private:
+    const size_t m_maxCapacity;
     std::map<Key, SingleQueue<Key, Value>> m_queues;
     std::shared_mutex m_queuesMutex;
     std::condition_variable_any m_cv;
@@ -56,8 +57,9 @@ private:
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
-PCQueue<Key, Value>::PCQueue()
-    : m_running(true)
+PCQueue<Key, Value>::PCQueue(size_t maxCapacity)
+    : m_maxCapacity(maxCapacity)
+    , m_running(true)
     , m_worker([&]() { Process(); })
 {}
 
@@ -97,14 +99,14 @@ void PCQueue<Key, Value>::Process()
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
-void PCQueue<Key, Value>::Subscribe(Key queueId, IConsumer<Key, Value>* consumer)
+void PCQueue<Key, Value>::Subscribe(const Key& queueId, IConsumer<Key, Value>* consumer)
 {
     {
         std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
         auto it = m_queues.find(queueId);
         if (it == m_queues.end())
         {
-            m_queues.try_emplace(queueId, queueId, consumer);
+            m_queues.try_emplace(queueId, queueId, consumer, m_maxCapacity);
         }
         else
         {
@@ -116,7 +118,7 @@ void PCQueue<Key, Value>::Subscribe(Key queueId, IConsumer<Key, Value>* consumer
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
-void PCQueue<Key, Value>::Unsubscribe(Key queueId)
+void PCQueue<Key, Value>::Unsubscribe(const Key& queueId)
 {
     std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
     auto it = m_queues.find(queueId);
@@ -129,14 +131,15 @@ void PCQueue<Key, Value>::Unsubscribe(Key queueId)
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
-void PCQueue<Key, Value>::Enqueue(Key queueId, Value value)
+bool PCQueue<Key, Value>::Enqueue(const Key& queueId, Value value)
 {
     std::shared_lock<std::shared_mutex> lock(m_queuesMutex);
+    bool result = false;
     auto it = m_queues.find(queueId);
     if (it != m_queues.end())
     {
         SingleQueue<Key, Value>& queue = it->second;
-        queue.Push(value);
+        result = queue.Push(std::move(value));
     }
     else
     {
@@ -145,18 +148,19 @@ void PCQueue<Key, Value>::Enqueue(Key queueId, Value value)
         auto secondIt = m_queues.find(queueId);
         if (secondIt == m_queues.end())
         {
-            secondIt = m_queues.try_emplace(queueId, queueId, nullptr).first;
+            secondIt = m_queues.try_emplace(queueId, queueId, nullptr, m_maxCapacity).first;
         }
 
         SingleQueue<Key, Value>& queue = secondIt->second;
-        queue.Push(value);
+        result = queue.Push(std::move(value));
     }
     m_cv.notify_one();
+    return result;
 }
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
-std::optional<Value> PCQueue<Key, Value>::Dequeue(Key queueId)
+std::optional<Value> PCQueue<Key, Value>::Dequeue(const Key& queueId)
 {
     std::shared_lock<std::shared_mutex> lock(m_queuesMutex);
     auto it = m_queues.find(queueId);
