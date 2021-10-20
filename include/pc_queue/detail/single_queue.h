@@ -49,6 +49,7 @@ SingleQueue<Key, Value>::SingleQueue(SingleQueue&& other) noexcept
     : m_id(other.m_id)
 {
     m_consumer = other.m_consumer;
+    other.m_consumer = nullptr;
     m_queue = std::move(other.m_queue);
 }
 
@@ -58,6 +59,7 @@ SingleQueue<Key, Value>& SingleQueue<Key, Value>::operator= (SingleQueue<Key, Va
 {
     m_id = other.m_id;
     m_consumer = other.m_consumer;
+    other.m_consumer = nullptr;
     m_queue = std::move(other.m_queue);
     return *this;
 }
