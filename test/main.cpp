@@ -60,16 +60,14 @@ BOOST_AUTO_TEST_CASE(BasicTest)
 BOOST_AUTO_TEST_CASE(MultithreadingTest)
 {
     size_t count = 10000000;
-    std::vector<std::pair<uint8_t, uint64_t>> actualQueue;
-    actualQueue.reserve(count);
-
-    std::atomic_uint32_t counter = 0;
+    std::atomic_uint32_t receivedItems = 0;
+    std::atomic_uint32_t sentItems = 0;
 
     PCQueue<uint8_t, uint64_t> q;
 
     Consumer<uint8_t, uint64_t> c([&](uint8_t id, const uint64_t& value)
         {
-            actualQueue.emplace_back(id, value);
+            receivedItems.fetch_add(1, std::memory_order::memory_order_relaxed);
         }
     );
 
@@ -77,8 +75,8 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
     {
         q.Subscribe(key, &c);
 
-        while (counter < count)
-            q.Enqueue(key, counter++);
+        while (sentItems < count)
+            q.Enqueue(key, sentItems.fetch_add(1, std::memory_order::memory_order_relaxed));
     };
 
     std::thread t1{ [&]() { worker(1); } };
@@ -97,7 +95,7 @@ BOOST_AUTO_TEST_CASE(MultithreadingTest)
 
     q.StopProcessing(true);
 
-    BOOST_TEST(counter == actualQueue.size());
+    BOOST_TEST(sentItems == receivedItems);
 }
 
 //-------------------------------------------------------------------------------
@@ -107,14 +105,12 @@ BOOST_AUTO_TEST_CASE(PerformanceTest)
 
     auto perfTest = [&](int threadsCount)
     {
-        std::vector<std::pair<int, std::string>> actualQueue;
-        actualQueue.reserve(count);
-
-        std::atomic_uint32_t counter = 0;
+        std::atomic_uint32_t receivedItems = 0;
+        std::atomic_uint32_t sentItems = 0;
 
         Consumer<int, std::string> c([&](int id, const std::string& value)
             {
-                actualQueue.emplace_back(id, value);
+                receivedItems.fetch_add(1, std::memory_order::memory_order_relaxed);
             }
         );
 
@@ -122,8 +118,8 @@ BOOST_AUTO_TEST_CASE(PerformanceTest)
         {
             q.Subscribe(key, &c);
 
-            while (counter < count)
-                q.Enqueue(key, "msg" + std::to_string(counter++));
+            while (sentItems < count)
+                q.Enqueue(key, "msg" + std::to_string(sentItems.fetch_add(1, std::memory_order::memory_order_relaxed)));
         };
 
         {
@@ -148,7 +144,7 @@ BOOST_AUTO_TEST_CASE(PerformanceTest)
             std::cout << "Time elapsed with " << std::to_string(threadsCount) << " threads: " << std::chrono::duration_cast<std::chrono::seconds>(end - begin).count() << "[s]" << std::endl;
         }
 
-        BOOST_TEST(counter == actualQueue.size());
+        BOOST_TEST(sentItems == receivedItems);
     };
 
     perfTest(1);

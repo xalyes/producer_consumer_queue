@@ -43,57 +43,15 @@ public:
     ~PCQueue();
 
 private:
-    void Process();
-
-private:
     std::map<Key, SingleQueue<Key, Value>> m_queues;
     std::shared_mutex m_queuesMutex;
     std::condition_variable_any m_cv;
-
-    std::atomic_bool m_running;
-    std::thread m_worker;
 };
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
 PCQueue<Key, Value>::PCQueue()
-    : m_running(true)
-    , m_worker([&]() { Process(); })
 {}
-
-//-------------------------------------------------------------------------------
-template<typename Key, typename Value>
-void PCQueue<Key, Value>::Process()
-{
-    auto queuesEmpty = [&]()
-    {
-        auto itFound = std::find_if(m_queues.begin(), m_queues.end(),
-            [](const std::pair<const Key, SingleQueue<Key, Value>>& q) { return !q.second.Empty(); }
-        );
-        return itFound == m_queues.end();
-    };
-
-    while (m_running)
-    {
-        std::shared_lock<std::shared_mutex> lock(m_queuesMutex);
-
-        if (queuesEmpty())
-        {
-            m_cv.wait(lock, [&] {
-                    return !m_running || !queuesEmpty();
-                }
-            );
-        }
-
-        if (!m_running)
-            return;
-
-        for (auto& queue : m_queues)
-        {
-            queue.second.ConsumeAll();
-        }
-    }
-}
 
 //-------------------------------------------------------------------------------
 template<typename Key, typename Value>
@@ -104,11 +62,7 @@ void PCQueue<Key, Value>::Subscribe(Key queueId, IConsumer<Key, Value>* consumer
         auto it = m_queues.find(queueId);
         if (it == m_queues.end())
         {
-            m_queues.emplace(
-                std::piecewise_construct,
-                std::forward_as_tuple(queueId),
-                std::forward_as_tuple(queueId, consumer)
-            );
+            m_queues.try_emplace(queueId, queueId, consumer, 2);
         }
         else
         {
@@ -140,7 +94,7 @@ void PCQueue<Key, Value>::Enqueue(Key queueId, Value value)
     if (it != m_queues.end())
     {
         SingleQueue<Key, Value>& queue = it->second;
-        queue.Push(value);
+        queue.Push(std::move(value));
     }
     else
     {
@@ -149,15 +103,11 @@ void PCQueue<Key, Value>::Enqueue(Key queueId, Value value)
         auto secondIt = m_queues.find(queueId);
         if (secondIt == m_queues.end())
         {
-            secondIt = m_queues.emplace(
-                std::piecewise_construct,
-                std::forward_as_tuple(queueId),
-                std::forward_as_tuple(queueId, nullptr)
-            ).first;
+            secondIt = m_queues.try_emplace(queueId, queueId, nullptr, 2).first;
         }
 
         SingleQueue<Key, Value>& queue = secondIt->second;
-        queue.Push(value);
+        queue.Push(std::move(value));
     }
     m_cv.notify_one();
 }
@@ -181,16 +131,12 @@ std::optional<Value> PCQueue<Key, Value>::Dequeue(Key queueId)
 template<typename Key, typename Value>
 void PCQueue<Key, Value>::StopProcessing(bool waitConsume /* = true */)
 {
-    m_running = false;
-    m_cv.notify_one();
-    m_worker.join();
-
     if (waitConsume)
     {
         std::unique_lock<std::shared_mutex> lock(m_queuesMutex);
         for (auto& queue : m_queues)
         {
-            queue.second.ConsumeAll();
+            queue.second.StopProcessing(true);
         }
     }
 }
