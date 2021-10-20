@@ -75,7 +75,7 @@ void SingleQueue<Key, Value>::Process()
 
     while (true)
     {
-        std::vector<Value> m_buffer;
+        std::vector<Value> buffer;
         {
             std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -90,17 +90,17 @@ void SingleQueue<Key, Value>::Process()
             if (!m_running)
                 return;
 
-            m_buffer.reserve(m_queue.size());
+            buffer.reserve(m_queue.size());
 
             while (!m_queue.empty())
             {
-                m_buffer.emplace_back(std::move(m_queue.front()));
+                buffer.emplace_back(std::move(m_queue.front()));
                 m_queue.pop();
             }
         }
 
         std::shared_lock<std::shared_mutex> lock(m_consumerMutex);
-        for (auto& item : m_buffer)
+        for (auto& item : buffer)
         {
             try
             {
